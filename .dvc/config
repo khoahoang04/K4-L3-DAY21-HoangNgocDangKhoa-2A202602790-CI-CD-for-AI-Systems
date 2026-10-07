@@ -1,0 +1,5 @@
+[core]
+    remote = labstore
+['remote "labstore"']
+    url = gs://income-bucket-momentum-510409-a4/dvc
+    credentialpath = ../sa-key.json
