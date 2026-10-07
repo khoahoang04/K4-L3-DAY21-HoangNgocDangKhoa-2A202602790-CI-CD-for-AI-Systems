@@ -5,8 +5,9 @@ import yaml
 import json
 import joblib
 import os
+import numpy as np
 from sklearn.ensemble import GradientBoostingClassifier
-from sklearn.metrics import accuracy_score, f1_score
+from sklearn.metrics import accuracy_score, f1_score, classification_report, confusion_matrix
 
 # Nguong chat luong cua lab nay la f1_score, KHONG phai accuracy.
 # Ly do: bo du lieu Adult co ty le lop 75/25. Mot mo hinh doan bua
@@ -41,6 +42,13 @@ def train(
     X_eval = df_eval.drop(columns=["target"])
     y_eval = df_eval["target"]
 
+    # Bonus 5: Canh bao lech lac du lieu (Data Drift)
+    pos_ratio = float(y_train.mean())
+    if abs(pos_ratio - 0.248) > 0.05:
+        print(f"CANH BAO (Data Drift): Ty le lop duong ({pos_ratio:.4f}) lech qua 5% so voi moc 24.8%!")
+    else:
+        print(f"Kiem tra phan phoi: Ty le lop duong = {pos_ratio:.4f} (on dinh)")
+
     if not os.environ.get("MLFLOW_TRACKING_URI"):
         mlflow.set_tracking_uri("sqlite:///mlflow.db")
 
@@ -60,9 +68,38 @@ def train(
         f1 = float(f1_score(y_eval, preds))
         acc = float(accuracy_score(y_eval, preds))
 
+        # Bonus 2: Dieu chinh nguong quyet dinh (Threshold Tuning)
+        probs = model.predict_proba(X_eval)[:, 1]
+        best_thresh = 0.5
+        best_f1 = f1
+        for th in np.arange(0.1, 0.95, 0.05):
+            th_preds = (probs >= th).astype(int)
+            th_f1 = float(f1_score(y_eval, th_preds))
+            if th_f1 > best_f1:
+                best_f1 = th_f1
+                best_thresh = round(float(th), 2)
+
+        print(f"Threshold Tuning: Nguong toi uu = {best_thresh} voi F1 = {best_f1:.4f} (nguong mac dinh 0.5: F1 = {f1:.4f})")
+
+        # Bonus 3: Tao bao cao Precision / Recall tu dong
+        cm = confusion_matrix(y_eval, preds)
+        cls_report = classification_report(y_eval, preds, target_names=["<=50K", ">50K"])
+        print("Confusion Matrix:\n", cm)
+        print("Classification Report:\n", cls_report)
+
+        os.makedirs("outputs", exist_ok=True)
+        with open("outputs/detail.txt", "w", encoding="utf-8") as f:
+            f.write("=== CONFUSION MATRIX ===\n")
+            f.write(str(cm) + "\n\n")
+            f.write("=== CLASSIFICATION REPORT ===\n")
+            f.write(cls_report)
+
         # TODO 6: Ghi nhan chi so vao MLflow
         mlflow.log_metric("f1_score", f1)
         mlflow.log_metric("accuracy", acc)
+        mlflow.log_metric("positive_ratio", pos_ratio)
+        mlflow.log_metric("best_threshold", best_thresh)
+        mlflow.log_metric("best_f1_score", best_f1)
         mlflow.sklearn.log_model(model, "model")
 
         # TODO 7: In ket qua ra man hinh
@@ -70,9 +107,14 @@ def train(
 
         # TODO 8: Luu metrics ra file outputs/report.json
         # File nay duoc doc boi GitHub Actions o Buoc 2
-        os.makedirs("outputs", exist_ok=True)
         with open("outputs/report.json", "w") as f:
-            json.dump({"f1_score": f1, "accuracy": acc}, f)
+            json.dump({
+                "f1_score": f1,
+                "accuracy": acc,
+                "positive_ratio": pos_ratio,
+                "best_threshold": best_thresh,
+                "best_f1_score": best_f1,
+            }, f, indent=2)
 
         # TODO 9: Luu mo hinh ra file models/model.joblib
         # File nay duoc upload len cloud storage o Buoc 2
